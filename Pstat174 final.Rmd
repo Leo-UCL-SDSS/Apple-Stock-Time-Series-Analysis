@@ -1,0 +1,269 @@
+---
+title: "Pstat 174 final project--Apple Stock time series analysis"
+output: html_document
+date: "2026-06-10"
+author: "Haofan Liao(haofan@ucsb.edu)"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pacman)
+pacman::p_load(
+  quantmod,
+  forecast,
+  tseries,
+  rugarch,
+  FinTS
+)
+```
+
+## Abstract
+
+Financial markets generate large volumes of time-dependent data, making them an important application of time series analysis. This project analyzes Apple Inc. (AAPL) daily stock data from January 2010 to June 2026 using statistical forecasting and volatility modeling techniques. The adjusted closing price series was obtained from Yahoo Finance and transformed into daily log returns for analysis. Stationarity was examined using the Augmented Dickey-Fuller (ADF) test, which indicated that stock prices are nonstationary while log returns are stationary. The Box-Jenkins approach was applied to model the return series, resulting in the selection of an ARIMA(0,0,1) model. Diagnostic checks suggested that the model adequately captured the linear dependence structure of the returns. To investigate volatility dynamics, a GARCH(1,1) model was fitted. The results revealed significant volatility clustering and strong volatility persistence, with an estimated persistence parameter of α₁ + β₁ = 0.948, indicating that volatility shocks decay slowly over time. Forecasts from the ARIMA model suggested that future returns remain close to their long-run average, while the GARCH model predicted elevated short-term volatility that gradually reverts toward its long-run level. The findings illustrate how ARIMA and GARCH models can jointly describe both the expected return behavior and the evolving risk characteristics of financial assets.
+
+```{r,echo=FALSE, include=FALSE}
+getSymbols("AAPL", src = "yahoo", from = "2010-01-01")
+price <- Ad(AAPL)
+adf_price <- adf.test(as.numeric(price))
+returns <- diff(log(price))
+returns <- na.omit(returns)
+adf_returns <- adf.test(as.numeric(returns))
+returns_num <- as.numeric(returns)
+
+fit_arima <- Arima(returns, order = c(0,0,1), include.mean = TRUE)
+summary(fit_arima)
+
+
+fit_arima <- auto.arima(
+  returns,
+  seasonal = FALSE
+)
+
+fit_ar1 <- Arima(returns, order = c(1,0,0), include.mean = TRUE)
+fit_ma1 <- Arima(returns, order = c(0,0,1), include.mean = TRUE)
+fit_arma11 <- Arima(returns, order = c(1,0,1), include.mean = TRUE)
+model_selection <- data.frame(
+  Model = c("ARIMA(1,0,0)", "ARIMA(0,0,1)", "ARIMA(1,0,1)"),
+  AIC = c(AIC(fit_ar1), AIC(fit_ma1), AIC(fit_arma11)),
+  BIC = c(BIC(fit_ar1), BIC(fit_ma1), BIC(fit_arma11))
+)
+
+forecast_result <- forecast(
+  fit_arima,
+  h = 12
+)
+
+
+spec <- ugarchspec(
+  variance.model = list(
+    model = "sGARCH",
+    garchOrder = c(1,1)
+  ),
+  mean.model = list(
+    armaOrder = c(0,1),
+    include.mean = TRUE
+  ),
+  distribution.model = "norm"
+)
+
+garch_fit <- ugarchfit(
+  spec = spec,
+  data = returns_num
+)
+
+garch_forecast <- ugarchforecast(
+  garch_fit,
+  n.ahead = 12
+)
+
+vol <- sigma(garch_fit)
+
+```
+
+## Introduction
+
+Financial markets generate large volumes of time-dependent data and play a central role in the global economy. Because even small fluctuations in stock prices can have significant consequences for investors, firms, and financial institutions, understanding the behavior of financial time series has become an important problem in statistics, economics, and data science. Time series methods provide a framework for identifying patterns in financial data, evaluating market behavior, and developing forecasting models that can improve our understanding of both return dynamics and risk.
+
+Among publicly traded companies, Apple Inc. (AAPL) represents an especially interesting case study. Apple is one of the most heavily traded equities in the world, with major exposure to technological innovation, consumer demand, and macroeconomic conditions. These characteristics make Apple returns a useful case study for examining both return dynamics and volatility behavior. The objective of this project is to investigate the statistical properties of Apple stock returns, model their behavior over time, and analyze the evolution of market volatility.
+
+To achieve these objectives, several time series methods are employed. The analysis begins with the Augmented Dickey-Fuller (ADF) test to determine whether the stock price and return series satisfy the stationarity assumptions required for subsequent modeling. Based on these results, the Box-Jenkins methodology is applied to identify and estimate an appropriate ARIMA model for the return series. While ARIMA models the conditional mean behavior of returns, financial data often exhibit periods of changing volatility that cannot be captured by mean models alone. Therefore, a GARCH(1,1) model is subsequently fitted to examine volatility clustering and persistence, two well-documented characteristics of financial return data. Through this combination of methods, the project seeks to provide a comprehensive analysis of both the return dynamics and risk characteristics of Apple stock.
+
+## Data
+
+The dataset used in this project consists of historical daily stock prices for Apple Inc. (AAPL) obtained from Yahoo Finance. The sample period extends from January 2010 to June 2026 and contains approximately 4,100 daily observations. For each trading day, the dataset provides several variables, including the opening price, highest price, lowest price, closing price, adjusted closing price, and trading volume. The large sample size and high-frequency nature of the data make it well suited for time series analysis and forecasting.
+
+Apple was selected as the focus of this study because it is one of the largest publicly traded technology companies in the world and has maintained a significant presence in global financial markets over an extended period. Its high trading volume, economic importance, and long history of publicly available market data provide a valuable opportunity to examine the statistical properties of financial time series. Among the available variables, the adjusted closing price series was chosen for analysis because it accounts for stock splits and dividend adjustments, providing a more consistent measure of the stock’s value over time.
+
+To facilitate statistical modeling, daily log returns were computed from the adjusted closing prices according to \(r_t=\log\left(\frac{P_t}{P_{t-1}}\right)\),
+
+where \(P_t\) denotes the adjusted closing price on day \(t\). This transformation converts the original price series into a return series that is more appropriate for time series modeling. Financial return series are commonly used in empirical studies because they often satisfy stationarity assumptions more closely than price series and allow for the application of models such as ARIMA and GARCH. The resulting return series serves as the primary dataset for the subsequent analyses of return dynamics and volatility behavior.
+
+```{r fig.price, echo=FALSE, fig.cap="Apple Adjusted Closing Price (2010--2026)"}
+plot(price,
+     main="Apple Adjusted Closing Price",
+     ylab="Price",
+     xlab="Time")
+```
+
+## 3. Methodology
+
+### 3.1 Augmented Dickey-Fuller Test
+
+Stationarity is a fundamental assumption underlying many time series models because nonstationary series may exhibit changing statistical properties over time, making reliable forecasting and statistical inference more difficult. Therefore, the Augmented Dickey-Fuller (ADF) test was used to examine whether the Apple stock price series and the corresponding log return series were stationary. The ADF test evaluates the presence of a unit root, where the null hypothesis states that the series is nonstationary and the alternative hypothesis states that the series is stationary (Dickey & Fuller, 1979). The test was first applied to the adjusted closing price series and subsequently to the daily log return series to determine whether a transformation was required before model fitting.
+
+### 3.2 ARIMA Model
+
+After stationarity was established, the Box-Jenkins methodology was employed to model the return series (Box et al., 2015). The Box-Jenkins approach consists of four stages: model identification, parameter estimation, diagnostic checking, and forecasting. To identify an appropriate model structure, the Autocorrelation Function (ACF) and Partial Autocorrelation Function (PACF) were examined. Based on these patterns, an ARIMA model was fitted to the return series. Model adequacy was assessed using residual diagnostics and information criteria, and the selected model was subsequently used to generate short-term forecasts of future returns. The ARIMA framework is widely used because it provides a flexible approach for capturing linear dependence in stationary time series (Hyndman & Athanasopoulos, 2021).
+
+### 3.3 ARCH Test and GARCH Model
+
+While ARIMA models describe the conditional mean behavior of a series, financial returns frequently exhibit volatility clustering, where periods of high volatility tend to be followed by high volatility and periods of low volatility tend to be followed by low volatility. To investigate this phenomenon, the squared return series was examined and an ARCH-LM test was performed (Engle, 1982). The presence of conditional heteroskedasticity motivated the use of a GARCH model.
+
+To model the time-varying volatility of Apple stock returns, a GARCH(1,1) model was fitted. The GARCH framework extends the ARCH model by allowing the conditional variance to depend on both previous shocks and previous volatility (Bollerslev, 1986). Parameter estimates, diagnostic tests, and volatility forecasts were used to evaluate model performance and characterize the volatility dynamics of Apple stock returns. Because volatility persistence is a common feature of financial markets, the GARCH(1,1) specification has become one of the most widely used models for financial time series analysis.
+
+## 4. Results
+
+### 4.1 Stationarity Analysis
+
+The adjusted closing price series of Apple stock from January 2010 to June 2026 is presented in Figure 1. The series displays a pronounced upward trend over the sample period, with particularly strong growth observed after 2019. Such long-term trending behavior suggests that the statistical properties of the series may change over time, indicating potential nonstationarity. This observation is common in financial price series, where stock prices often evolve with market conditions, firm performance, and broader economic factors.
+
+```{r fig.price2, echo=FALSE, fig.cap="Figure 1: Apple Adjusted Closing Price (2010--2026)"}
+plot(price,
+     main="Apple Adjusted Closing Price",
+     ylab="Price",
+     xlab="Time")
+```
+
+To formally assess stationarity, an Augmented Dickey-Fuller (ADF) test was applied to the adjusted closing price series. The test produced a p-value of 0.9647, indicating that the null hypothesis of a unit root cannot be rejected. Therefore, the price series is considered nonstationary. This result is consistent with the visual evidence from Figure 3 and suggests that the original price series is not suitable for direct application of standard stationary time series models.
+
+To obtain a series more appropriate for statistical modeling, daily log returns were computed from the adjusted closing prices. The resulting return series is shown in Figure 2. In contrast to the original price series, the returns fluctuate around a relatively stable mean and do not exhibit a persistent long-term trend. While periods of higher and lower volatility are visible, the overall behavior appears considerably more stable over time.
+
+```{r fig.return, echo=FALSE, fig.cap="Figure 2:Apple Daily Log Return (2010--2026)"}
+plot(returns,
+     main="Apple Daily Log Returns",
+     ylab="Log Return",
+     xlab="Time")
+```
+A second ADF test was then performed on the log return series. The test produced a p-value below 0.01, leading to rejection of the unit root hypothesis at conventional significance levels. Therefore, the return series is considered stationary. This finding supports the common practice in financial time series analysis of modeling returns rather than prices and justifies the subsequent application of ARIMA and GARCH models to the transformed data.
+
+---
+
+### 4.2 ARIMA Modeling and Forecasting
+
+
+Having established that the log return series is stationary, the next step is to examine its dependence structure and determine whether past returns contain useful information for predicting future returns. To investigate this relationship, the Autocorrelation Function (ACF) and Partial Autocorrelation Function (PACF) of the return series are presented in Figure 3.
+
+```{r fig.acfpacf, echo=FALSE, fig.cap="Figure 3: ACF and PACF of Apple Returns"}
+par(mfrow=c(1,2))
+acf(returns, main="ACF of Apple Returns")
+pacf(returns, main="PACF of Apple Returns")
+par(mfrow=c(1,1))
+```
+
+Most autocorrelation coefficients are close to zero and remain within the confidence bounds, indicating only limited dependence across time. Similarly, the PACF displays only a few isolated significant spikes and does not suggest a strong autoregressive pattern. Together, these results imply that the return series exhibits weak serial dependence, a characteristic commonly observed in financial return data.
+
+```{r, echo=FALSE}
+model_selection
+```
+Several candidate ARIMA models were compared using AIC and BIC. The ARIMA(1,0,0) and ARIMA(0,0,1) models produced nearly identical information criteria values, indicating that both specifications provide a comparable fit to the data. Because the ACF plot suggested a weak moving-average structure and the difference in information criteria was negligible, ARIMA(0,0,1) was selected for subsequent analysis.
+
+```{r,echo=FALSE,fig.cap="Figure 4. Residual Diagnostics for the ARIMA(0,0,1) Model"}
+checkresiduals(fit_arima)
+```
+
+Based on the Box-Jenkins methodology, an ARIMA model was fitted to the return series. Among the candidate models considered, ARIMA(0,0,1) was selected as the most appropriate specification, indicating that the current return depends primarily on a single lagged shock through a moving-average component. Residual diagnostic checks suggested that the model adequately captured the linear dependence structure present in the data, leaving little remaining autocorrelation in the residuals.
+
+
+
+```{r fig.forecast, echo=FALSE, fig.cap="Figure 5: ARIMA Forecast of Apple Returns"}
+plot(forecast_result,
+     main = "Forecasts from ARIMA(0,0,1)",
+     ylab = "Log Return",
+     xlab = "Forecast Horizon")
+```
+
+The fitted ARIMA model was then used to generate short-term forecasts of future returns. The resulting forecasts remain close to the historical average return and quickly converge toward a stable level. This outcome is consistent with the weak autocorrelation observed in the ACF and PACF plots, suggesting that past returns provide only limited predictive information about future returns. Consequently, while the ARIMA model is useful for describing the return dynamics of Apple stock, it does not indicate substantial predictability in future returns.
+
+Although the ARIMA model adequately described the conditional mean behavior of returns, financial markets often exhibit dependence in volatility that cannot be captured by mean models alone. Therefore, the analysis now turns to the conditional variance behavior of Apple stock returns.
+
+
+### 4.3 GARCH Modeling and Volatility Analysis
+
+While the ARIMA analysis suggests that Apple stock returns exhibit only weak serial dependence and limited predictability, this does not necessarily imply that all aspects of the series behave randomly. To investigate the presence of volatility dependence, the squared return series was examined. The ACF of the squared returns displays significant positive autocorrelation across multiple lags, indicating that volatility remains correlated over time even though returns themselves exhibit little autocorrelation. This pattern is commonly referred to as volatility clustering, where periods of high volatility tend to be followed by high volatility and periods of low volatility tend to be followed by low volatility.
+
+```{r fig.squared, echo=FALSE, fig.cap="Figure 6: Squared Returns and ACF of Squared Returns"}
+par(mfrow=c(1,2))
+plot(returns^2,
+     main="Squared Returns")
+acf(returns^2,
+    main="ACF of Squared Returns")
+par(mfrow=c(1,1))
+```
+
+To investigate the presence of volatility dependence, the squared return series was examined. The ACF of the squared returns displays significant positive autocorrelation across multiple lags, indicating that volatility itself remains correlated over time even though the returns exhibit little autocorrelation. This pattern is commonly referred to as volatility clustering, where periods of high volatility tend to be followed by high volatility and periods of low volatility tend to be followed by low volatility.
+
+To formally assess this behavior, an ARCH-LM test was performed to detect conditional heteroskedasticity. The test provided evidence of ARCH effects in the return series, supporting the use of a GARCH model for volatility analysis.
+
+Based on these findings, a GARCH(1,1) model was fitted to the return series. The estimated parameters were α₁ = 0.101 and β₁ = 0.847, both of which were statistically significant. The volatility persistence measure, α₁ + β₁ = 0.948, is close to one, indicating that volatility shocks dissipate gradually and can influence market uncertainty for an extended period. This result suggests a substantial degree of volatility persistence in Apple stock returns.
+
+Diagnostic tests performed on the standardized residuals and standardized squared residuals produced large p-values, indicating that the model successfully captured the volatility dependence present in the data. Therefore, the GARCH(1,1) specification appears adequate for describing the conditional variance dynamics of the return series.
+
+
+
+```{r fig.volatility, echo=FALSE, fig.cap="Figure 7: Estimated Conditional Volatility of Apple Returns"}
+plot(index(returns),
+     vol,
+     type="l",
+     main="Estimated Conditional Volatility of Apple Returns",
+     xlab="Time",
+     ylab="Volatility"
+)
+```
+Figure 7 presents the estimated conditional volatility obtained from the fitted GARCH model. Several episodes of elevated volatility can be observed throughout the sample period, particularly during periods of heightened market uncertainty. The clustering of volatility is clearly visible, providing further evidence of the time-varying risk characteristics of financial returns.
+
+Several periods of elevated volatility can be observed throughout the sample period. The most pronounced spike occurs around 2020, coinciding with the COVID-19 pandemic and the resulting uncertainty in global financial markets. Another period of heightened volatility appears around 2022, when inflation concerns and rising interest rates contributed to market instability. These episodes illustrate how major economic events can influence the risk characteristics of Apple stock and contribute to the volatility clustering observed in the return series.
+
+
+```{r fig.garchforecast, echo=FALSE, fig.cap="Figure 8: Garch Volatility Forecast"}
+plot(garch_forecast, which=3)
+```
+Finally, the fitted GARCH model was used to generate a 12-step volatility forecast. The forecast indicates elevated short-term volatility that gradually declines toward its long-run level over time. This behavior reflects the mean-reverting nature of the GARCH process and is consistent with the estimated persistence parameter. Although volatility shocks may persist for some time, the model suggests that their influence eventually diminishes as the system returns toward its long-run equilibrium level of risk.
+
+
+## 5. Conclusion
+
+This project examined the behavior of Apple Inc. (AAPL) daily stock data from January 2010 to June 2026 using a combination of time series techniques. Beginning with the adjusted closing price series, the analysis first investigated whether the data satisfied the stationarity assumptions required for statistical modeling. The Augmented Dickey-Fuller (ADF) tests showed that while the original price series is nonstationary, the corresponding log return series is stationary. This finding motivated the use of the return series for subsequent analysis and modeling.
+
+With a stationary series established, the Box-Jenkins methodology was applied to examine the dependence structure of Apple stock returns. The selected ARIMA(0,0,1) model indicated only weak serial dependence, and the resulting forecasts remained close to the historical average return. These results suggest that past returns provide limited information for predicting future returns, which is consistent with the widely observed difficulty of forecasting financial markets.
+
+Although the return series itself exhibited little autocorrelation, further analysis revealed a different pattern in its volatility behavior. The squared return series displayed clear evidence of volatility clustering, indicating that periods of heightened market uncertainty tend to persist over time. A GARCH(1,1) model was therefore fitted to capture this dependence, producing a volatility persistence measure of α₁ + β₁ = 0.948. This result implies that volatility shocks dissipate slowly and continue to influence market risk long after they occur. The model successfully described the time-varying volatility of Apple stock and generated reasonable short-term volatility forecasts.
+
+Overall, the findings demonstrate that while future stock returns remain difficult to predict, the evolution of market risk exhibits a more structured and persistent pattern. By combining ADF testing, ARIMA modeling, and GARCH modeling, this project illustrates how time series methods can be used to analyze both return dynamics and volatility behavior in financial markets. Future research could extend this analysis by incorporating additional explanatory variables, multivariate time series models, or modern machine learning approaches to further improve forecasting performance and deepen the understanding of financial market behavior.
+
+
+## Reference
+
+Box, G. E. P., Jenkins, G. M., Reinsel, G. C., & Ljung, G. M. (2015). Time Series Analysis: Forecasting and Control (5th ed.). Wiley.  
+
+Bollerslev, T. (1986). Generalized autoregressive conditional heteroskedasticity. Journal of Econometrics, 31(3), 307–327.  
+
+Dickey, D. A., & Fuller, W. A. (1979). Distribution of the estimators for autoregressive time series with a unit root. Journal of the American Statistical Association, 74(366), 427–431.  
+
+Engle, R. F. (1982). Autoregressive conditional heteroscedasticity with estimates of the variance of United Kingdom inflation. Econometrica, 50(4), 987–1007.  
+
+Hyndman, R. J., & Athanasopoulos, G. (2021). Forecasting: Principles and Practice (3rd ed.). OTexts.
+
+Tsay, R. S. (2010). Analysis of Financial Time Series (3rd ed.). Wiley.
+
+Yahoo Finance. Apple Inc. (AAPL) historical data. https://finance.yahoo.com/quote/AAPL/
+
+R Core Team. R: A Language and Environment for Statistical Computing. https://www.r-project.org/
+
+Hyndman, R. J. forecast R package. https://cran.r-project.org/package=forecast
+
+Ghalanos, A. rugarch R package. https://cran.r-project.org/package=rugarch
+
+Ryan, J. A., & Ulrich, J. M. quantmod R package. https://cran.r-project.org/package=quantmod
+
+Trapletti, A., & Hornik, K. tseries R package. https://cran.r-project.org/package=tseries
